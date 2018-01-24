@@ -66,15 +66,17 @@ bank_manager_check_key(Who, Map) when is_map(Map) ->
 bank_manager(X) ->
     receive
         {From, {add, Who, Amount}} ->
-            Op_map = bank_manager_check_key(
-                Who, 
-                X, 
-                fun(Map) -> Map#{Who => bank:new()} end),
-            From ! bank:add(maps:get(Who, Op_map), Amount),
-            bank_manager(Op_map);
+            Op_bank = maps:get(Who, X, bank:new()), %
+            From ! bank:add(Op_bank, Amount),
+            bank_manager(X#{Who => Op_bank});       %% recur with new map overriding prev bank of Who
 
         {From, {withdraw, Who, Amount}} ->
-            bank_manager_check_key(From, Who, X) == {incorrect_key, Who} andalso bank_manager(X), %% shorthand if
+            Key_exists = bank_manager_check_key(From, Who, X),
+            if 
+                Key_exists == {incorrect_key, Who} -> 
+                    From ! Key_exists,
+                    bank_manager(X) 
+            end,
             From ! bank:withdraw(maps:get(Who, X), Amount),
             bank_manager(X);
 
