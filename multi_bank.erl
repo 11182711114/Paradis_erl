@@ -1,5 +1,6 @@
 -module(multi_bank).
 -compile(export_all).
+-import(bank, [new/0,add/2,withdraw/2,balance/1]).
 
 test() ->
     Pid = new_manager(),
@@ -38,22 +39,14 @@ rpc(Pid, X) ->
             Any
     end.
 
-bank_manager_check_key(Pid, Who, Map) when is_map(Map) ->
-    IsKey = maps:is_key(Who,Map),
+bank_manager_check_key(Who, Map) when is_map(Map), is_list(Who) ->
+    Incorrect_keys = [X || X <- Who, not maps:is_key(X,Map)],
     if 
-        not IsKey ->
-            Pid ! {incorrect_key, Who},
-            {incorrect_key, Who};
+        length(Incorrect_keys) > 0 ->
+            {incorrect_keys, Incorrect_keys};
         true ->
-            {correct_key, Who}
+            {correct_keys}
     end;
-bank_manager_check_key(Who, Map, Fun) when is_function(Fun)  ->
-    IsKey = maps:is_key(Who,Map),
-    if 
-        not IsKey ->
-            Fun(Map)
-    end.
-
 bank_manager_check_key(Who, Map) when is_map(Map) ->
     IsKey = maps:is_key(Who,Map),
     if 
@@ -63,37 +56,33 @@ bank_manager_check_key(Who, Map) when is_map(Map) ->
             {correct_key, Who}
     end.
 
+
 bank_manager(X) ->
     receive
         {From, {add, Who, Amount}} ->
             Op_bank = maps:get(Who, X, bank:new()), %
             From ! bank:add(Op_bank, Amount),
-            bank_manager(X#{Who => Op_bank});       %% recur with new map overriding prev bank of Who
+            bank_manager(X#{Who => Op_bank});       %% recur with new map overriding prev bank of Who so we handle creating new banks without special logic
 
         {From, {withdraw, Who, Amount}} ->
-            Key_exists = bank_manager_check_key(From, Who, X),
-            if 
-                Key_exists == {incorrect_key, Who} -> 
+            Key_exists = bank_manager_check_key(Who, X),
+            case Key_exists of
+                {incorrect_key, Who} -> 
                     From ! Key_exists,
-                    bank_manager(X) 
-            end,
-            From ! bank:withdraw(maps:get(Who, X), Amount),
-            bank_manager(X);
+                    bank_manager(X);
+
+                {correct_key, Who} ->
+                    From ! bank:withdraw(maps:get(Who, X), Amount),
+                    bank_manager(X)
+            end;
 
         {From, {lend, Lender, To, Amount}} ->
-            LenderExists = bank_manager_check_key(Lender, X),
-            ToExists = bank_manager_check_key(To, X),
-            if 
-                LenderExists == {incorrect_key, Lender} andalso ToExists == {incorrect_key, To} ->
-                    From ! {incorrect_keys, [Lender, To]};
-                
-                LenderExists == {incorrect_key, Lender} ->
-                    From ! LenderExists;
+            Incorrect_keys = bank_manager_check_key([Lender, To], X),
+            case Incorrect_keys of 
+                {incorrect_keys, _Any} ->
+                    From ! Incorrect_keys;
 
-                ToExists == {incorrect_key, To} ->
-                    From ! ToExists;
-
-                true ->
+                {correct_keys} ->
                     LenderProc = maps:get(Lender, X),
                     LenderBalance = bank:balance(LenderProc),
                     if 
@@ -105,11 +94,17 @@ bank_manager(X) ->
                         true ->
                             From ! insufficient_funds
                     end
-                end,
-                bank_manager(X);
-
+            end,
+            bank_manager(X);
+            
         {From, {balance, Who}} ->
-            bank_manager_check_key(From, Who, X) == {incorrect_key, Who} andalso bank_manager(X),
-            From ! bank:balance(maps:get(Who, X)),
+            Bank = maps:get(Who, X, {incorrect_key, Who}),
+            case Bank of 
+                {incorrect_key, Who} ->
+                    From ! Bank;
+
+                Existing_bank ->
+                    From ! bank:balance(Existing_bank)
+            end,
             bank_manager(X)
     end.
