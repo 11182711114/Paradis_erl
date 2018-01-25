@@ -39,15 +39,18 @@ rpc(Pid, X) ->
             Any
     end.
 
-bank_manager_check_key(Who, Map) when is_map(Map), is_list(Who) ->
+check_key_exists_in_map(Who, Map) when is_map(Map), is_list(Who) ->
+    %% Checks weather the keys in Who exists in map Map
+    %% Returns {correct_keys} when all keys are valid or
+    %% Returns {incorrect_keys, X} where X is a list of invalid keys
     Incorrect_keys = [X || X <- Who, not maps:is_key(X,Map)],
-    if 
-        length(Incorrect_keys) > 0 ->
-            {incorrect_keys, Incorrect_keys};
-        true ->
-            {correct_keys}
+    case Incorrect_keys of 
+        [] ->
+            {correct_keys};
+        _Any ->
+            {incorrect_keys, Incorrect_keys}
     end;
-bank_manager_check_key(Who, Map) when is_map(Map) ->
+check_key_exists_in_map(Who, Map) when is_map(Map) ->
     IsKey = maps:is_key(Who,Map),
     if 
         not IsKey ->
@@ -57,54 +60,69 @@ bank_manager_check_key(Who, Map) when is_map(Map) ->
     end.
 
 
+manager_add(From, Who, Amount, Map) ->
+    Op_bank = maps:get(Who, Map, bank:new()), %% Get the value associated with Who or default to a new bank when Who is not a key in X
+    From ! bank:add(Op_bank, Amount),       %% Add the amount to the associated bank and send the result of operation to From
+    Map#{Who => Op_bank}.       %% Returnsnew map overriding prev bank of Who so we handle creating new banks without special logic
+
+manager_withdraw(From, Who, Amount, Map) ->
+    Key_exists = check_key_exists_in_map(Who, Map),
+    case Key_exists of
+        {incorrect_key, Who} -> 
+            From ! Key_exists;
+
+        {correct_key, Who} ->
+            From ! bank:withdraw(maps:get(Who, Map), Amount)
+    end,
+    Map.
+
+manager_lend(From, Lender, To, Amount, Map) ->
+    Incorrect_keys = check_key_exists_in_map([Lender, To], Map),
+    case Incorrect_keys of 
+        {incorrect_keys, _Any} ->
+            From ! Incorrect_keys;
+
+        {correct_keys} ->
+            LenderProc = maps:get(Lender, Map),
+            LenderBalance = bank:balance(LenderProc),
+            if 
+                LenderBalance >= Amount ->
+                    bank:withdraw(LenderProc, Amount),
+                    bank:add(maps:get(To, Map), Amount),
+                    From ! ok;
+            
+                true ->
+                    From ! insufficient_funds
+            end
+    end,
+    Map.
+
+manager_balance(From, Who, Map) ->
+    Bank = maps:get(Who, Map, {incorrect_key, Who}),
+    case Bank of 
+        {incorrect_key, Who} ->
+            From ! Bank;
+
+        Existing_bank ->
+            From ! bank:balance(Existing_bank)
+    end,
+    Map.
+
+% @doc Keeps track of banks with a map(atom => bank) and acts on them
+% @author Fredrik Larsson
+% @version 1.0
+% @param X map of atom => bank
 bank_manager(X) ->
     receive
-        {From, {add, Who, Amount}} ->
-            Op_bank = maps:get(Who, X, bank:new()), %
-            From ! bank:add(Op_bank, Amount),
-            bank_manager(X#{Who => Op_bank});       %% recur with new map overriding prev bank of Who so we handle creating new banks without special logic
+        {From, {add, Who, Amount}} ->            
+            bank_manager(manager_add(From, Who, Amount, X));
 
         {From, {withdraw, Who, Amount}} ->
-            Key_exists = bank_manager_check_key(Who, X),
-            case Key_exists of
-                {incorrect_key, Who} -> 
-                    From ! Key_exists,
-                    bank_manager(X);
-
-                {correct_key, Who} ->
-                    From ! bank:withdraw(maps:get(Who, X), Amount),
-                    bank_manager(X)
-            end;
+            bank_manager(manager_withdraw(From, Who, Amount, X));
 
         {From, {lend, Lender, To, Amount}} ->
-            Incorrect_keys = bank_manager_check_key([Lender, To], X),
-            case Incorrect_keys of 
-                {incorrect_keys, _Any} ->
-                    From ! Incorrect_keys;
-
-                {correct_keys} ->
-                    LenderProc = maps:get(Lender, X),
-                    LenderBalance = bank:balance(LenderProc),
-                    if 
-                        LenderBalance >= Amount ->
-                            bank:withdraw(LenderProc, Amount),
-                            bank:add(maps:get(To, X), Amount),
-                            From ! ok;
-                  
-                        true ->
-                            From ! insufficient_funds
-                    end
-            end,
-            bank_manager(X);
+            bank_manager(manager_lend(From, Lender, To, Amount, X));
             
         {From, {balance, Who}} ->
-            Bank = maps:get(Who, X, {incorrect_key, Who}),
-            case Bank of 
-                {incorrect_key, Who} ->
-                    From ! Bank;
-
-                Existing_bank ->
-                    From ! bank:balance(Existing_bank)
-            end,
-            bank_manager(X)
+            bank_manager(manager_balance(From, Who, X))
     end.
