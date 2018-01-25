@@ -1,5 +1,5 @@
 -module(prime).
--compile(export_all).
+-export([is_prime/1,seq/1,filter/2,filter_LC/2,all_primes/1,rotate/2]).
 
 is_prime(1) ->
     false;
@@ -44,9 +44,16 @@ all_primes(N) ->
 
 rotate(_N, []) ->
     [];
-rotate(N, L) ->
-    rotate_body(N rem length(L), L). %% This should hold?
+rotate(N, L) when N >= 0 ->
+    rotate_body(N rem length(L), L); %% This should hold since for all groups of iterations length(L) the result will be the same as the original list
+rotate(N, L) when N < 0 ->
+    %% left rotation = right rotation on reversed list
+    %% rotation iterations is the absolute number, e.g. -3 -> 3
+    lists:reverse(rotate(abs(N), lists:reverse(L))).
 
-rotate_body(0, L) -> L;
-rotate_body(N, [H|T]) ->
-    rotate(N-1, T ++ [H]).
+rotate_body(0, L) -> L; %% Base case
+rotate_body(N, [H|T]) when N > 0 ->
+    rotate_body(N-1, T ++ [H]).
+% rotate_body(N, L) when N < 0 -> %% Unnecessary
+%     [H|T] = lists:reverse(L),
+%     rotate_body(N+1, lists:reverse(T ++ [H])).
