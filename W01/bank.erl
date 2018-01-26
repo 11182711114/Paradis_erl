@@ -1,6 +1,14 @@
 -module(bank).
 -compile(export_all).
 
+
+%%  Run by;
+%%      test()          --> unit tests
+%%      new()           --> spawns a new process running bank(X)
+%%      balance(Pid)    --> returns the balance of Pid
+%%      add(Pid, X)     --> adds X to the bank Pid
+%%      withdraw(Pid, X)--> withdraws X from the bank Pid
+
 test() ->
     Pid = new(),
     ok = add(Pid, 10),
