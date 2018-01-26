@@ -38,7 +38,6 @@ area({circle,R}) ->
 
 % temperature conversion 
 % using formula 5(F-32) = 9C
-% F = 
 
 temperature_convert({c,C}) -> 
     F = C*9/5+32,
