@@ -18,10 +18,14 @@ test_all() ->
     % melting point of sulfur 
     {f,212.0} = temperature_convert({c,100}), 
     24 = factorial(4),
+    362880 = factorial(9),
+    1 = factorial(0),
+    {'EXIT',{{negativeNumber,-1},_}} = (catch factorial(-1)),
     hooray.
 
+factorial(N) when N < 0 -> error({negativeNumber, N});
 factorial(0) -> 1;
-factorial(N) -> N*factorial(N-1).
+factorial(N) when N > 0 -> N*factorial(N-1).
 
 test1() ->
     io:format("double(2) is ~p~n",[double(2)]).
