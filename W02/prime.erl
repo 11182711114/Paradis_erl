@@ -8,7 +8,9 @@ is_prime(_N, _N) -> true; %% If the recursion reaches the number then it is a pr
 is_prime(N, Div) ->
     %% Checking if its a prime by starting from the bottom is more efficient than 
     %% starting from the top, e.g. is_prime(10000) req. 5000 iterations to determine 
-    %% it is divisible by 5000 by starting from the top instead of 1 iteration to find it is divisible by 2. 
+    %% it is divisible by 5000 by starting from the top instead of 1 iteration to find it is divisible by 2.
+    %%! This is a slow algorithm, using a sieve would be more practical for numbers that are 
+    %%! reasonable to create lists for
     case (N rem Div) > 0 of
         true -> 
             is_prime(N, Div+1);
@@ -16,28 +18,27 @@ is_prime(N, Div) ->
             false
     end.
 
-get_timestamp() ->
-    {Mega, Sec, Micro} = os:timestamp(),
-    (Mega*1000000 + Sec)*1000 + round(Micro/1000).
-
-test(N) ->
-    A = get_timestamp(),
-    sieve(N),
-    B = get_timestamp(),
-    io:format("sieve/1: ~pms~n",[B-A]),
-    C = get_timestamp(),
-    all_primes(N),
-    D = get_timestamp(),
-    io:format("all_primes/1: ~pms~n",[D-C]).
-
-
-sieve(N) ->
+is_prime_sieve(1) -> false;   
+is_prime_sieve(N) ->
     prime(lists:seq(2,N)).
 
 prime([]) -> [];
 prime([Prime|Tail]) ->
     [Prime] ++ prime([N || N <- Tail, N rem Prime /= 0]).
 
+get_timestamp() ->
+    {Mega, Sec, Micro} = os:timestamp(),
+    (Mega*1000000 + Sec)*1000 + round(Micro/1000).
+
+test(N) ->
+    A = get_timestamp(),
+    is_prime_sieve(N),
+    B = get_timestamp(),
+    io:format("sieve/1: ~pms~n",[B-A]),
+    C = get_timestamp(),
+    all_primes(N),
+    D = get_timestamp(),
+    io:format("all_primes/1: ~pms~n",[D-C]).
 
 
 seq(N) -> seq(N,1).
@@ -63,7 +64,7 @@ all_primes(N) -> filter(fun is_prime/1, seq(N)).
 
 
 rotate(_N, []) -> [];
-rotate(N, L) when N >= 0 -> %% O(N-1)
+rotate(N, L) when N >= 0 -> %% O(N)
     rotate_body(N rem length(L), L); %% This should hold since for all groups of iterations length(L) the result will be the same as the original list
 rotate(N, L) when N < 0 ->
     %% left rotation = right rotation on reversed list
@@ -71,11 +72,8 @@ rotate(N, L) when N < 0 ->
     lists:reverse(rotate(abs(N), lists:reverse(L))).
 
 rotate_body(0, L) -> L; %% Base case
-rotate_body(N, [H|T]) when N > 0 ->
+rotate_body(N, [H|T]) ->
     rotate_body(N-1, T ++ [H]).
-% rotate_body(N, L) when N < 0 -> %% Unnecessary
-%     [H|T] = lists:reverse(L),
-%     rotate_body(N+1, lists:reverse(T ++ [H])).
 
 
 
