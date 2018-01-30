@@ -102,6 +102,8 @@ eval_divide(_A,0) ->
 eval_divide(A,B) ->
     eval(A) / eval(B).
 
+%%TODO: Fix tuple representation
+%%TODO: e.g. {error,{divide,4,{plus,-2,2}}} -> {error,{divide,4,0}}
 eval_for_proc(E, From) ->
     try
         case E of
@@ -120,7 +122,7 @@ eval_for_proc(E, From) ->
         end
     catch
         error:badarith ->
-            throw({error, From})
+            throw({error, E, From})
     end.
 
 
@@ -147,7 +149,7 @@ evaluator() ->
             Any -> io:format("unknown message: ~p~n",[Any])
         end
     catch
-        throw:{error, EFrom} ->
-            EFrom ! {error, EFrom}
+        throw:{error, Error, EFrom} ->
+            EFrom ! {error, Error}
     end,
     evaluator().
