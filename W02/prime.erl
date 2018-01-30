@@ -102,6 +102,25 @@ eval_divide(_A,0) ->
 eval_divide(A,B) ->
     eval(A) / eval(B).
 
+
+test_safe_eval() ->
+    {ok, 2} = safe_eval({plus,1,1}),
+    {ok, 0} = safe_eval({minus,1,1}),
+    {ok, 2} = safe_eval({minus,1,-1}),
+    {ok, 3.0} = safe_eval({divide,21,7}),
+    {ok, 26} = safe_eval({times,13,2}),
+    {ok, 0} = safe_eval({plus,125,{minus,200,325}}),
+    {ok, 2} = safe_eval({plus,1,1}), 
+    {ok, 1.4} = safe_eval({divide,7,5}),
+    {error, {divide_by_zero}} = safe_eval({plus,1,{times,4,{divide,4,0}}}),   
+    {error, {divide_by_zero}} = safe_eval({plus,1,{divide,4,{minus,4,{plus,3,1}}}}),
+    {error, {unknown_value, monday}} = safe_eval({plus,1,monday}),
+    {error, {unknown_value, saturday}} = safe_eval({plus,1,{plus,saturday,4}}),
+    {test_safe_eval, success}.
+
+safe_eval(X) ->
+    Evaluator = spawn(fun evaluator/0),
+    eval_rpc(Evaluator, X).
 %%TODO: Fix tuple representation
 %%TODO: e.g. {error,{divide,4,{plus,-2,2}}} -> {error,{divide,4,0}}
 eval_for_proc(E, From) ->
@@ -114,21 +133,26 @@ eval_for_proc(E, From) ->
             {times,A,B} ->
                 eval_for_proc(A, From) * eval_for_proc(B, From);
             {divide,A,B} ->
-                eval_for_proc(A, From) / eval_for_proc(B, From);
+                A_val = eval_for_proc(A, From),
+                B_val = eval_for_proc(B, From),
+                if 
+                    B_val == 0 -> throw(divide_by_zero);
+                    true -> continue
+                end,
+                A_val / B_val;
             X when is_integer(X) or is_float(X) ->
                 X;
             Any ->
-                {unknown_value,Any}
+                throw({unknown_value, Any})
         end
     catch
         error:badarith ->
-            throw({error, E, From})
+            throw({error, From, {E}});
+        throw:divide_by_zero ->
+            throw({error, From, {divide_by_zero}});
+        throw:{unknown_value, Val} ->
+            throw({error, From, {unknown_value, Val}})
     end.
-
-
-safe_eval(X) ->
-    Evaluator = spawn(fun evaluator/0),
-    eval_rpc(Evaluator, X).
 
 eval_rpc(Pid, X) ->
     Pid ! {self(), X},
@@ -149,7 +173,7 @@ evaluator() ->
             Any -> io:format("unknown message: ~p~n",[Any])
         end
     catch
-        throw:{error, Error, EFrom} ->
+        throw:{error, EFrom, Error} ->
             EFrom ! {error, Error}
     end,
     evaluator().
