@@ -40,7 +40,7 @@ prime([Prime|Tail]) ->
 
 
 
-seq(N) -> seq(N,1).
+seq(N) when N > 0 -> seq(N,1).
 
 seq(N, N) -> [N];
 seq(N, Count) -> [Count] ++ seq(N,Count+1).
@@ -49,6 +49,8 @@ seq(N, Count) -> [Count] ++ seq(N,Count+1).
 filter_LC(F, L) -> %% Using list comprehension
     [X || X <- L, F(X)].
 
+
+%% Make this parallel
 filter(_F, []) -> [];
 filter(F, [H|T]) ->
     case F(H) of
@@ -58,12 +60,64 @@ filter(F, [H|T]) ->
             filter(F,T)
     end.
 
+filterp(F, L) ->
+    filterp_spawner(self(), F, L, 0),
+    gather(0, length(L)).
+
+filterp_spawner(_From, _F, [], _Num) -> [];
+filterp_spawner(From, F, [H|T], Num) ->
+    spawn(fun() -> filterp_body(From, F, H, Num) end),
+    filterp_spawner(From, F, T, Num+1).
+
+filterp_body(From, F, H, Num) ->
+    case F(H) of
+        true ->
+            From ! {Num, [H]};
+        false ->
+            From ! {Num, []}
+    end.
+
+gather(End,End) -> [];
+gather(X, End) ->
+    receive
+        {X, Res} ->
+            Res ++ gather(X+1,End)
+    end.
+
+test_filters(N) ->
+    F = fun(X) -> timer:sleep(100), X rem 63 == 0 end, 
+    A = get_timestamp(),
+    filter(F, lists:seq(1,N)),
+    B = get_timestamp(),
+    io:format("filter/2: ~pms~n",[B-A]),
+    C = get_timestamp(),
+    filterp(F, lists:seq(1,N)),
+    D = get_timestamp(),
+    io:format("filterp/2: ~pms~n",[D-C]).
+
+
 
 all_primes(N) -> filter(fun is_prime/1, seq(N)).
 
+all_primesp(N) -> filterp(fun is_prime/1, seq(N)).
+
+test_primes(N) ->
+    A = get_timestamp(),
+    all_primes(N),
+    B = get_timestamp(),
+    io:format("all_primes/1: ~pms~n",[B-A]),
+    C = get_timestamp(),
+    all_primesp(N),
+    D = get_timestamp(),
+    io:format("all_primesp/1: ~pms~n",[D-C]),
+    E = get_timestamp(),
+    sieve(N),
+    F = get_timestamp(),
+    io:format("sieve/1: ~pms~n",[F-E]).
+
 
 rotate(_N, []) -> [];
-rotate(N, L) when N >= 0 -> %% O(N-1)
+rotate(N, L) when N >= 0 ->
     rotate_body(N rem length(L), L); %% This should hold since for all groups of iterations length(L) the result will be the same as the original list
 rotate(N, L) when N < 0 ->
     %% left rotation = right rotation on reversed list
@@ -71,7 +125,7 @@ rotate(N, L) when N < 0 ->
     lists:reverse(rotate(abs(N), lists:reverse(L))).
 
 rotate_body(0, L) -> L; %% Base case
-rotate_body(N, [H|T]) when N > 0 ->
+rotate_body(N, [H|T]) ->
     rotate_body(N-1, T ++ [H]).
 % rotate_body(N, L) when N < 0 -> %% Unnecessary
 %     [H|T] = lists:reverse(L),
