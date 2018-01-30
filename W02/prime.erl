@@ -9,8 +9,7 @@ is_prime(N, Div) ->
     %% Checking if its a prime by starting from the bottom is more efficient than 
     %% starting from the top, e.g. is_prime(10000) req. 5000 iterations to determine 
     %% it is divisible by 5000 by starting from the top instead of 1 iteration to find it is divisible by 2.
-    %%! This is a slow algorithm, using a sieve would be more practical for numbers that are 
-    %%! reasonable to create lists for
+    %%! This is a slow algorithm, using a sieve would be more practical, see solution below.
     case (N rem Div) > 0 of
         true -> 
             is_prime(N, Div+1);
@@ -19,12 +18,12 @@ is_prime(N, Div) ->
     end.
 
 is_prime_sieve(1) -> false;   
-is_prime_sieve(N) ->
-    prime(lists:seq(2,N)).
+is_prime_sieve(N) -> 
+    is_prime_sieve_body(lists:seq(2,N)).
 
-prime([]) -> [];
-prime([Prime|Tail]) ->
-    [Prime] ++ prime([N || N <- Tail, N rem Prime /= 0]).
+is_prime_sieve_body([]) -> [];
+is_prime_sieve_body([Prime|Tail]) -> 
+    [Prime] ++ is_prime_sieve_body([N || N <- Tail, N rem Prime /= 0]).
 
 get_timestamp() ->
     {Mega, Sec, Micro} = os:timestamp(),
@@ -44,11 +43,12 @@ test(N) ->
 seq(N) -> seq(N,1).
 
 seq(N, N) -> [N];
-seq(N, Count) -> [Count] ++ seq(N,Count+1).
+seq(N, Count) -> 
+    [Count] ++ seq(N,Count+1).
 
 
 filter_LC(F, L) -> %% Using list comprehension
-    [X || X <- L, F(X)].
+    [X || X <- L, F(X)]. 
 
 filter(_F, []) -> [];
 filter(F, [H|T]) ->
@@ -60,7 +60,8 @@ filter(F, [H|T]) ->
     end.
 
 
-all_primes(N) -> filter(fun is_prime/1, seq(N)).
+all_primes(N) -> 
+    filter(fun is_prime/1, seq(N)).
 
 
 rotate(_N, []) -> [];
@@ -77,55 +78,76 @@ rotate_body(N, [H|T]) ->
 
 
 
-% eval(E) ->
-%     case E of
-%         {plus,A,B} ->
-%             eval(A) + eval(B);
-%         {minus,A,B} ->
-%             eval(A) - eval(B);
-%         {times,A,B} ->
-%             eval(A) * eval(B);
-%         {divide,A,B} ->
-%             case eval_divide(A,B) of
-%                 {error, divide_by_zero} ->
-%                     test;
-%                 X ->
-%                     X
-%             end;
-%         X when is_integer(X) or is_float(X) ->
-%             X;
-%         Any ->
-%             {unknown_value,Any}
-%     end.
+eval(E) ->
+    case E of
+        {plus,A,B} ->
+            eval(A) + eval(B);
+        {minus,A,B} ->
+            eval(A) - eval(B);
+        {times,A,B} ->
+            eval(A) * eval(B);
+        {divide,A,B} ->
+            case eval_divide(A,B) of
+                {error, divide_by_zero} -> error(divide_by_zero);
+                X -> X
+            end;
+        X when is_integer(X) or is_float(X) ->
+            X;
+        Any ->
+            {unknown_value,Any}
+    end.
 
-% eval_divide(_A,0) ->
-%     {error, divide_by_zero};
-% eval_divide(A,B) ->
-%     eval(A) / eval(B).
+eval_divide(_A,0) ->
+    {error, divide_by_zero};
+eval_divide(A,B) ->
+    eval(A) / eval(B).
 
-% eval_rpc(Pid, X) ->
-%     Pid ! {self(), X},
-%     receive
-%         Any -> Any
-%     end.
+eval_for_proc(E, From) ->
+    try
+        case E of
+            {plus,A,B} ->
+                eval_for_proc(A, From) + eval_for_proc(B, From);
+            {minus,A,B} ->
+                eval_for_proc(A, From) - eval_for_proc(B, From);
+            {times,A,B} ->
+                eval_for_proc(A, From) * eval_for_proc(B, From);
+            {divide,A,B} ->
+                eval_for_proc(A, From) / eval_for_proc(B, From);
+            X when is_integer(X) or is_float(X) ->
+                X;
+            Any ->
+                {unknown_value,Any}
+        end
+    catch
+        error:badarith ->
+            throw({error, From})
+    end.
 
-% evaluator() ->
-%     receive
-%         {plus,A,B} ->
-%             eval(A) + eval(B);
-%         {minus,A,B} ->
-%             eval(A) - eval(B);
-%         {times,A,B} ->
-%             eval(A) * eval(B);
-%         {divide,A,B} ->
-%             case eval_divide(A,B) of
-%                 {error, divide_by_zero} ->
-%                     test;
-%                 X ->
-%                     X
-%             end;
-%         X when is_integer(X) or is_float(X) ->
-%             X;
-%         Any ->
-%             {unknown_value,Any}
-%     end.
+
+safe_eval(X) ->
+    Evaluator = spawn(fun evaluator/0),
+    eval_rpc(Evaluator, X).
+
+eval_rpc(Pid, X) ->
+    Pid ! {self(), X},
+    receive
+        Any -> Any
+    end.
+
+evaluator() ->
+    try
+        receive
+            {From, {Op,A,B}} ->
+                From ! {ok, eval_for_proc({Op, A,B}, From)};
+            {From, X} when is_integer(X) or is_float(X) ->
+                From ! {ok, X};
+            {From, Any} ->
+                From ! {unknown_value, Any};
+
+            Any -> io:format("unknown message: ~p~n",[Any])
+        end
+    catch
+        throw:{error, EFrom} ->
+            EFrom ! {error, EFrom}
+    end,
+    evaluator().
