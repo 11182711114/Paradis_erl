@@ -1,6 +1,14 @@
 -module(bank).
 -compile(export_all).
 
+
+%%  Run by;
+%%      test()          --> unit tests
+%%      new()           --> spawns a new process running bank(X)
+%%      balance(Pid)    --> returns the balance of Pid
+%%      add(Pid, X)     --> adds X to the bank Pid
+%%      withdraw(Pid, X)--> withdraws X from the bank Pid
+
 test() ->
     Pid = new(),
     ok = add(Pid, 10),
@@ -11,40 +19,41 @@ test() ->
     insufficient_funds = withdraw(Pid, 20),
     horray.
 
-new() -> 
+new() ->
     spawn(fun() -> bank(0) end).
 
 balance(Pid) ->
-    rpc(Pid, balance).
+    rpc(Pid, {balance}).
 
-add(Pid, X) ->
+add(Pid, X) -> 
     rpc(Pid, {add, X}).
 
-withdraw(Pid, X) -> 
+
+withdraw(Pid, X) ->
     rpc(Pid, {withdraw, X}).
 
 rpc(Pid, X) ->
     Pid ! {self(), X},
     receive
-        Any -> Any
+        Any ->
+            Any
     end.
 
-bank(X) -> 
+bank(X) ->
     receive
-        {From, {add, Y}} -> 
-            From ! ok,
-            bank(X+Y);
-        {From, {withdraw, Y}} ->
-            ResultingBalance = X - Y,
-            if
-                ResultingBalance >= 0 -> % sufficient funds for withdraw
-                    From ! ok,
-                    bank(ResultingBalance);
-                true -> % else
-                    From ! insufficient_funds
-            end;
-        {From, balance} ->
-            From ! X
-    end,
-    bank(X). % Default, no modification on bank
-
+	{From, {add, Y}} ->
+	    From ! ok,
+	    bank(X+Y);
+	{From, {withdraw, Y}} ->
+        if 
+            X-Y >= 0 ->
+                From ! ok,
+                bank(X-Y);
+            true ->
+                From ! insufficient_funds,
+                bank(X)
+        end;
+	{From, {balance}} ->
+        From ! X,
+        bank(X)
+    end.
