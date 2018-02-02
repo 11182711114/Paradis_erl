@@ -2,7 +2,6 @@
 -compile(export_all).
 
 % --- tests --- %
-
 test() ->
     {test_is_prime, success} = test_is_prime(),
     {test_seq, success} = test_seq(),
@@ -226,34 +225,25 @@ safe_eval(X) ->
 %%TODO: e.g. {error,{divide,4,{plus,-2,2}}} -> {error,{divide,4,0}}
 %%? Or not?
 eval_for_proc(E, From) ->
-    try
-        case E of
-            {plus,A,B} ->
-                eval_for_proc(A, From) + eval_for_proc(B, From);
-            {minus,A,B} ->
-                eval_for_proc(A, From) - eval_for_proc(B, From);
-            {times,A,B} ->
-                eval_for_proc(A, From) * eval_for_proc(B, From);
-            {divide,A,B} ->
-                A_val = eval_for_proc(A, From),
-                B_val = eval_for_proc(B, From),
-                if 
-                    B_val == 0 -> throw(divide_by_zero);
-                    true -> continue
-                end,
-                A_val / B_val;
-            X when is_integer(X) or is_float(X) ->
-                X;
-            Any ->
-                throw({unknown_value, Any})
-        end
-    catch
-        error:badarith ->
-            throw({error, From, {E}});
-        throw:divide_by_zero ->
-            throw({error, From, {divide_by_zero}});
-        throw:{unknown_value, Val} ->
-            throw({error, From, {unknown_value, Val}})
+    case E of
+        {plus,A,B} ->
+            eval_for_proc(A, From) + eval_for_proc(B, From);
+        {minus,A,B} ->
+            eval_for_proc(A, From) - eval_for_proc(B, From);
+        {times,A,B} ->
+            eval_for_proc(A, From) * eval_for_proc(B, From);
+        {divide,A,B} ->
+            A_val = eval_for_proc(A, From),
+            B_val = eval_for_proc(B, From),
+            if 
+                B_val == 0 -> throw({error, From, {divide_by_zero, E}});
+                true -> continue
+            end,
+            A_val / B_val;
+        X when is_integer(X) or is_float(X) ->
+            X;
+        Any ->
+            throw({error, From, {unknown_value, Any}})
     end.
 
 rpc(Pid, X) ->
