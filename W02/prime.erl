@@ -7,7 +7,6 @@ test() ->
     {test_seq, success} = test_seq(),
     {test_filter, success} = test_filter(),
     {test_all_primes, success} = test_all_primes(),
-    {test_safe_eval, success} = test_safe_eval(),
     hooray.
 
 test_is_prime() ->
@@ -43,20 +42,6 @@ test_all_primes() ->
     Primes = all_primesp(200),
     {test_all_primes, success}.
 
-test_safe_eval() ->
-    {ok, 2} = safe_eval({plus,1,1}),
-    {ok, 0} = safe_eval({minus,1,1}),
-    {ok, 2} = safe_eval({minus,1,-1}),
-    {ok, 3.0} = safe_eval({divide,21,7}),
-    {ok, 26} = safe_eval({times,13,2}),
-    {ok, 0} = safe_eval({plus,125,{minus,200,325}}),
-    {ok, 2} = safe_eval({plus,1,1}), 
-    {ok, 1.4} = safe_eval({divide,7,5}),
-    {error, {divide_by_zero}} = safe_eval({plus,1,{times,4,{divide,4,0}}}),   
-    {error, {divide_by_zero}} = safe_eval({plus,1,{divide,4,{minus,4,{plus,3,1}}}}),
-    {error, {unknown_value, monday}} = safe_eval({plus,1,monday}),
-    {error, {unknown_value, saturday}} = safe_eval({plus,1,{plus,saturday,4}}),
-    {test_safe_eval, success}.
 
 % --- benchmarks --- %
 get_timestamp() ->
@@ -64,39 +49,17 @@ get_timestamp() ->
     (Mega*1000000 + Sec)*1000 + round(Micro/1000).
 
 bench_is_prime(N) ->
-    A = get_timestamp(),
-    is_prime_sieve(N),
-    B = get_timestamp(),
-    io:format("sieve/1: ~pms~n",[B-A]),
-    C = get_timestamp(),
-    all_primes(N),
-    D = get_timestamp(),
-    io:format("all_primes/1: ~pms~n",[D-C]).
+    A = get_timestamp(), is_prime_sieve(N), B = get_timestamp(), io:format("sieve/1: ~pms~n",[B-A]),
+    C = get_timestamp(), all_primes(N), D = get_timestamp(), io:format("all_primes/1: ~pms~n",[D-C]).
 
 bench_filters(N) ->
     F = fun(X) -> timer:sleep(100), X rem 63 == 0 end, 
-    A = get_timestamp(),
-    filter(F, lists:seq(1,N)),
-    B = get_timestamp(),
-    io:format("filter/2: ~pms~n",[B-A]),
-    C = get_timestamp(),
-    filterp(F, lists:seq(1,N)),
-    D = get_timestamp(),
-    io:format("filterp/2: ~pms~n",[D-C]).
+    A = get_timestamp(), filter(F, lists:seq(1,N)), B = get_timestamp(), io:format("filter/2: ~pms~n",[B-A]),
+    C = get_timestamp(), filterp(F, lists:seq(1,N)), D = get_timestamp(), io:format("filterp/2: ~pms~n",[D-C]).
 
 bench_all_primes(N) ->
-    A = get_timestamp(),
-    all_primes(N),
-    B = get_timestamp(),
-    io:format("all_primes/1: ~pms~n",[B-A]),
-    C = get_timestamp(),
-    all_primesp(N),
-    D = get_timestamp(),
-    io:format("all_primesp/1: ~pms~n",[D-C]),
-    E = get_timestamp(),
-    sieve(N),
-    F = get_timestamp(),
-    io:format("sieve/1: ~pms~n",[F-E]).
+    A = get_timestamp(), all_primes(N), B = get_timestamp(), io:format("all_primes/1: ~pms~n",[B-A]),
+    C = get_timestamp(), all_primesp(N), D = get_timestamp(), io:format("all_primesp/1: ~pms~n",[D-C]).
 
 % --- is_prime --- %
 is_prime(1) -> false; %% assumption, 1 is not a prime
@@ -116,21 +79,15 @@ is_prime(N, Div) ->
             false
     end.
 
+%% Generates a list of primes(up to N) using a sieve and then check if the last number in the list is N.
 is_prime_sieve(1) -> false;   
 is_prime_sieve(N) -> 
-    is_prime_sieve_body(lists:seq(2,N)).
+    [H|_T] = lists:reverse(is_prime_sieve_body(lists:seq(2,N))),
+    H == N.
 
 is_prime_sieve_body([]) -> [];
 is_prime_sieve_body([Prime|Tail]) -> 
     [Prime] ++ is_prime_sieve_body([N || N <- Tail, N rem Prime /= 0]).
-
-sieve(N) ->
-    prime(lists:seq(2,N)).
-
-prime([]) -> [];
-prime([Prime|Tail]) ->
-    [Prime] ++ prime([N || N <- Tail, N rem Prime /= 0]).
-
 
 % --- seq --- %
 seq(N) when N > 0 -> seq(N,1).
@@ -140,10 +97,11 @@ seq(N, Count) ->
     [Count] ++ seq(N,Count+1).
 
 % --- filter --- %
-filter_LC(F, L) -> %% Using list comprehension
+    % List comprehension based filter
+filter_LC(F, L) ->
     [X || X <- L, F(X)]. 
 
-
+    % Recursive based filter
 filter(_F, []) -> [];
 filter(F, [H|T]) ->
     case F(H) of
@@ -153,14 +111,15 @@ filter(F, [H|T]) ->
             filter(F,T)
     end.
 
-
+    % parallel filter
 filterp(F, L) ->
     filterp_spawner(self(), F, L, 0),
     gather(0, length(L)).
 
+        %% recursivly spawns filters for each item in the list and assigns them their number  
 filterp_spawner(_From, _F, [], _Num) -> [];
 filterp_spawner(From, F, [H|T], Num) ->
-    spawn(fun() -> filterp_body(From, F, H, Num) end),
+    spawn(?MODULE, filterp_body, [From, F,H,Num]),
     filterp_spawner(From, F, T, Num+1).
 
 filterp_body(From, F, H, Num) ->
@@ -171,12 +130,15 @@ filterp_body(From, F, H, Num) ->
             From ! {Num, []}
     end.
 
+        %% recursivly gathers the items from the list from 0 -> length(L)-1
+        %? should probably just gather them as they go in tuples, {Num, Res} and sort after
+        %? to avoid worst case wait time
 gather(End,End) -> [];
 gather(X, End) ->
     receive
         {X, Res} ->
             Res ++ gather(X+1,End)
-        after 25000 ->
+        after 25000 -> % worst case wait time before timeout is 24999*length(L) but should be very unlikely
             timeout
     end.
 
@@ -186,86 +148,3 @@ all_primes(N) ->
 
 all_primesp(N) -> filterp(fun is_prime/1, seq(N)).
 
-% --- rotate --- %
-rotate(_N, []) -> [];
-rotate(N, L) when N >= 0 ->
-    rotate_body(N rem length(L), L); %% This should hold since for all groups of iterations length(L) the result will be the same as the original list
-rotate(N, L) when N < 0 ->
-    %% left rotation = right rotation on reversed list
-    %% rotation iterations is the absolute number, e.g. -3 -> 3
-    lists:reverse(rotate(abs(N), lists:reverse(L))).
-
-rotate_body(0, L) -> L; %% Base case
-rotate_body(N, [H|T]) ->
-    rotate_body(N-1, T ++ [H]).
-
-
-% --- Eval --- %
-eval(E) ->
-    case E of
-        {plus,A,B} ->
-            eval(A) + eval(B);
-        {minus,A,B} ->
-            eval(A) - eval(B);
-        {times,A,B} ->
-            eval(A) * eval(B);
-        {divide,A,B} ->
-            eval(A) / eval(B);
-        X when is_integer(X) or is_float(X) ->
-            X;
-        Any ->
-            {unknown_value,Any}
-    end.
-
-% --- safe_eval --- %
-safe_eval(X) ->
-    Evaluator = spawn(fun evaluator/0),
-    rpc(Evaluator, X).
-%%TODO: Fix tuple representation
-%%TODO: e.g. {error,{divide,4,{plus,-2,2}}} -> {error,{divide,4,0}}
-%%? Or not?
-eval_for_proc(E, From) ->
-    case E of
-        {plus,A,B} ->
-            eval_for_proc(A, From) + eval_for_proc(B, From);
-        {minus,A,B} ->
-            eval_for_proc(A, From) - eval_for_proc(B, From);
-        {times,A,B} ->
-            eval_for_proc(A, From) * eval_for_proc(B, From);
-        {divide,A,B} ->
-            A_val = eval_for_proc(A, From),
-            B_val = eval_for_proc(B, From),
-            if 
-                B_val == 0 -> throw({error, From, {divide_by_zero, E}});
-                true -> continue
-            end,
-            A_val / B_val;
-        X when is_integer(X) or is_float(X) ->
-            X;
-        Any ->
-            throw({error, From, {unknown_value, Any}})
-    end.
-
-rpc(Pid, X) ->
-    Pid ! {self(), X},
-    receive
-        Any -> Any
-    end.
-
-evaluator() ->
-    try
-        receive
-            {From, {Op,A,B}} ->
-                From ! {ok, eval_for_proc({Op, A,B}, From)};
-            {From, X} when is_integer(X) or is_float(X) ->
-                From ! {ok, X};
-            {From, Any} ->
-                From ! {unknown_value, Any};
-
-            Any -> io:format("unknown message: ~p~n",[Any])
-        end
-    catch
-        throw:{error, EFrom, Error} ->
-            EFrom ! {error, Error}
-    end,
-    evaluator().
