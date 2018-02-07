@@ -8,7 +8,7 @@ start() ->
 
 
 doubler(X) when is_integer(X) ->
-    io:format("~p~n",[X*2]);
+    X*2;
 doubler(X) ->
     io:format("Non-integer input: ~p~n",[X]),
     throw(non_integer_input).

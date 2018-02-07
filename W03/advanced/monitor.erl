@@ -13,7 +13,7 @@ mymonitor(Mod, Func) ->
     process_flag(trap_exit, true),      
     link(Pid),                          % to this
     receive
-        {'EXIT', Pid, Why} ->
-            io:format("~p crashed: ~p~n",[Pid,Why]),
+        {'EXIT', Pid, _Why} ->
+            io:format("~p crashed~n",[Pid]),
             start()
     end.
