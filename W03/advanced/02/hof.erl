@@ -12,21 +12,19 @@ getTimeStamp() ->
 
 
 pmap_timeout(F, L, Timeout, MaxWorkers) ->
-    SplitList = list_op:splitList(L, MaxWorkers),
-    all_ok = spawn_worker(F, SplitList, self(), Timeout, timeout),
-    Res = gather(0, length(SplitList), []),
-    lists:reverse(lists:flatten(Res)).
-
-
-%* This assumes that the length(L) to MaxWorkers ratio makes sense, i.e. >= 1.
+    pmap(F, L, Timeout, MaxWorkers, timeout).
 pmap_maxtime(F, L, Timeout, MaxWorkers) ->
-    Deadline = getTimeStamp()+Timeout, % Convert a timeout counter to a deadline
+    pmap(F, L, Timeout, MaxWorkers, maxtime).
+
+pmap(F, L, Timeout, MaxWorkers, Type) ->
+    TO = if Type == maxtime -> getTimeStamp()+Timeout; true -> Timeout end,
 %   Split the list into parts that the different workers will use, 
 %       this is how the number of workers is limited
-    SplitList = list_op:splitList(L, MaxWorkers), 
-    all_ok = spawn_worker(F, SplitList, self(), Deadline, deadline), % Spawn workers for the lists
+    SplitList = list_op:splitList(L, MaxWorkers),
+    all_ok = spawn_worker(F, SplitList, self(), TO, Type),
     Res = gather(0, length(SplitList), []),
     lists:reverse(lists:flatten(Res)).
+
 
 %% When Count = Final -> return State
 gather(Final, Final, State) -> State;
@@ -39,7 +37,7 @@ gather(Count, Final, State) ->
     end.
 
 %% Conveniance entry function
-spawn_worker(F, SplitList, Pid, Deadline, deadline) ->
+spawn_worker(F, SplitList, Pid, Deadline, maxtime) ->
     spawn_worker_maxtime(F, SplitList, Pid, 0, Deadline);
 spawn_worker(F, SplitList, Pid, Timeout, timeout) ->
     spawn_worker_timeout(F, SplitList, Pid, 0, Timeout).
@@ -78,6 +76,7 @@ pmap_timeout_worker(F, [H|T], Num, Pid, Res, Timeout) ->
     NewRes = [FRes|Res],
     pmap_timeout_worker(F, T, Num, Pid, NewRes, Timeout).
 
+% actual worker
 pmap_actual_worker(F, Item, Pid) ->
     Res = try F(Item)
     catch error:_ -> error
