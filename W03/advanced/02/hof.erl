@@ -2,82 +2,67 @@
 
 -compile(export_all).
 
-fib(1) -> 1;
-fib(2) -> 1;
-fib(N) -> fib(N-1) + fib(N-2).
-
 getTimeStamp() ->
     {Mega, Sec, Micro} = os:timestamp(),
     (Mega*1000000 + Sec)*1000 + round(Micro/1000).
 
-
+% Entry functions
 pmap_timeout(F, L, Timeout, MaxWorkers) ->
     pmap(F, L, Timeout, MaxWorkers, timeout).
 pmap_maxtime(F, L, Timeout, MaxWorkers) ->
-    pmap(F, L, Timeout, MaxWorkers, maxtime).
+    pmap(F, L, Timeout, MaxWorkers, deadline).
 
-pmap(F, L, Timeout, MaxWorkers, Type) ->
-    TO = if Type == maxtime -> getTimeStamp()+Timeout; true -> Timeout end,
-%   Split the list into parts that the different workers will use, 
-%       this is how the number of workers is limited
+% The high level work
+pmap(F, L, Timeout, MaxWorkers, TimeoutStrategy) ->
+    TO = if TimeoutStrategy == deadline -> getTimeStamp()+Timeout; true -> Timeout end, % if its a deadline(maxtime) we need the deadline time
+%   Split the list into parts that the different workers will use. 
+%       This is the only way the number of workers is limited,
+%       list_op:splitList splits a bit bad on short lists, 
+%       e.g. length 10 list, split into 3 -> 4,4,2
     SplitList = list_op:splitList(L, MaxWorkers),
-    all_ok = spawn_worker(F, SplitList, self(), TO, Type),
-    Res = gather(0, length(SplitList), []),
+    all_ok = spawn_supervisors(F, SplitList, self(), TO, TimeoutStrategy), % Spawns supervisors that will spawn workers to do the work
+    Res = gather(0, length(SplitList), []), % Gathers the results recursivly in order
     lists:reverse(lists:flatten(Res)).
 
 
 %% When Count = Final -> return State
 gather(Final, Final, State) -> State;
-%% Recursivly gather the parts in order, if we time out and result is not in the mailbox
-%% we will fail and add timeout instead
+%% Recursivly gather the parts in order
 gather(Count, Final, State) ->
     receive
         {Count, Res} ->
             gather(Count+1, Final, [Res|State])
     end.
 
-%% Conveniance entry function
-spawn_worker(F, SplitList, Pid, Deadline, maxtime) ->
-    spawn_worker_maxtime(F, SplitList, Pid, 0, Deadline);
-spawn_worker(F, SplitList, Pid, Timeout, timeout) ->
-    spawn_worker_timeout(F, SplitList, Pid, 0, Timeout).
+%% Conveniance entry functions
+spawn_supervisors(F, SplitList, Pid, Deadline, TimeoutStrategy) ->
+    spawn_supervisors(F, SplitList, Pid, 0, Deadline, TimeoutStrategy).
 
 %% Spawns a worker for every list in the deeplist
-spawn_worker_maxtime(_F, [], _Pid, _Order, _Deadline) -> all_ok; %% Base case
-spawn_worker_maxtime(F, [H|T], Pid, Order, Deadline) ->
-    spawn(?MODULE, pmap_maxtime_worker, [F, H, Order, Pid, [], Deadline]),
-    spawn_worker_maxtime(F, T, Pid, Order+1, Deadline).
+spawn_supervisors(_F, [], _Pid, _Order, _Deadline, _TimeoutStrategy) -> all_ok; %% Base case
+spawn_supervisors(F, [H|T], Pid, Order, Deadline, TimeoutStrategy) ->
+    spawn(?MODULE, worker_supervisor, [F, H, Order, Pid, [], Deadline, TimeoutStrategy]),
+    spawn_supervisors(F, T, Pid, Order+1, Deadline, TimeoutStrategy).
 
-spawn_worker_timeout(_F, [], _Pid, _Order, _Timeout) -> all_ok; %% Base case
-spawn_worker_timeout(F, [H|T], Pid, Order, Timeout) ->
-    spawn(?MODULE, pmap_timeout_worker, [F, H, Order, Pid, [], Timeout]),
-    spawn_worker_timeout(F, T, Pid, Order+1, Timeout).
-
-%% A worker, runs F(X) on head recursivly through the list until nothing is left and then sends back Res
-pmap_maxtime_worker(_F, [], Num, Pid, Res, _Deadline)   -> Pid ! {Num, Res};
-pmap_maxtime_worker(F, [H|T], Num, Pid, Res, Deadline) ->
-    spawn(?MODULE, pmap_actual_worker, [F, H, self()]),
-    TmpRem = Deadline - getTimeStamp(), % Convert deadline to time left for use in after
+%% A worker supervisor, will spawn a worker for each element in the given list and wait for the specified time for a message with the result.
+%% Note that while this spawns concurrent processes the work is done sequencially
+worker_supervisor(_F, [], Num, Pid, Res, _Deadline, _TimeoutStrategy)   -> Pid ! {Num, Res};
+worker_supervisor(F, [H|T], Num, Pid, Res, Deadline, TimeoutStrategy) ->
+    spawn(?MODULE, worker, [F, H, self()]),
+    TmpRem = case TimeoutStrategy of
+        deadline -> Deadline - getTimeStamp(); % Convert deadline to time left for use in after
+        timeout -> Deadline
+    end,
     Timeleft = if TmpRem>=0 -> TmpRem; true -> 0 end, % Make sure timeleft is >=0
     FRes = receive
         X -> X
         after Timeleft -> timeout
     end,
     NewRes = [FRes|Res],
-    pmap_maxtime_worker(F, T, Num, Pid, NewRes, Deadline).
+    worker_supervisor(F, T, Num, Pid, NewRes, Deadline, TimeoutStrategy).
 
-pmap_timeout_worker(_F, [], Num, Pid, Res, _Timeout)   -> Pid ! {Num, Res};
-pmap_timeout_worker(F, [H|T], Num, Pid, Res, Timeout) ->
-    spawn(?MODULE, pmap_actual_worker, [F, H, self()]),
-    FRes = receive
-        X -> X
-        after Timeout -> timeout
-    end,
-    NewRes = [FRes|Res],
-    pmap_timeout_worker(F, T, Num, Pid, NewRes, Timeout).
-
-% actual worker
-pmap_actual_worker(F, Item, Pid) ->
+% Actual worker
+worker(F, Item, Pid) ->
     Res = try F(Item)
     catch error:_ -> error
     end,
