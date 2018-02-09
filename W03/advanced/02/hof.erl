@@ -2,9 +2,6 @@
 
 -compile(export_all).
 
-getTimeStamp() ->
-    {Mega, Sec, Micro} = os:timestamp(),
-    (Mega*1000000 + Sec)*1000 + round(Micro/1000).
 
 % Entry functions
 pmap_timeout(F, L, Timeout, MaxWorkers) ->
@@ -14,7 +11,7 @@ pmap_maxtime(F, L, Timeout, MaxWorkers) ->
 
 % The high level work
 pmap(F, L, Timeout, MaxWorkers, TimeoutStrategy) ->
-    TO = if TimeoutStrategy == deadline -> getTimeStamp()+Timeout; true -> Timeout end, % if its a deadline(maxtime) we need the deadline time
+    TO = if TimeoutStrategy == deadline -> misc:getTimeStamp()+Timeout; true -> Timeout end, % if its a deadline(maxtime) we need the deadline time
 %   Split the list into parts that the different workers will use. 
 %       This is the only way the number of workers is limited,
 %       list_op:splitList splits a bit bad on short lists, 
@@ -46,17 +43,17 @@ spawn_supervisors(F, [H|T], Pid, Order, Deadline, TimeoutStrategy) ->
 
 %% A worker supervisor, will spawn a worker for each element in the given list and wait for the specified time for a message with the result.
 %% Note that while this spawns concurrent processes the work is done sequencially
-worker_supervisor(_F, [], Num, Pid, Res, _Deadline, _TimeoutStrategy)   -> Pid ! {Num, Res};
+worker_supervisor(_F, [], Num, Pid, Res, _Deadline, _TimeoutStrategy) -> Pid ! {Num, Res};
 worker_supervisor(F, [H|T], Num, Pid, Res, Deadline, TimeoutStrategy) ->
-    spawn(?MODULE, worker, [F, H, self()]),
+    Worker = spawn(?MODULE, worker, [F, H, self()]),
     TmpRem = case TimeoutStrategy of
-        deadline -> Deadline - getTimeStamp(); % Convert deadline to time left for use in after
+        deadline -> Deadline - misc:getTimeStamp(); % Convert deadline to time left for use in after
         timeout -> Deadline
     end,
     Timeleft = if TmpRem>=0 -> TmpRem; true -> 0 end, % Make sure timeleft is >=0
     FRes = receive
         X -> X
-        after Timeleft -> timeout
+        after Timeleft -> exit(Worker, timeout), timeout % Kill and return timeout if the worker should timeout
     end,
     NewRes = [FRes|Res],
     worker_supervisor(F, T, Num, Pid, NewRes, Deadline, TimeoutStrategy).
