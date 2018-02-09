@@ -9,7 +9,7 @@
 splitList(L, NrParts) ->
     Length = length(L),
     Rem = Length rem NrParts,
-    FirstLen = trunc(((Length-Rem) / NrParts) + Rem),   % Length of the first list
+    FirstLen = trunc(((Length-Rem) / NrParts) + Rem),   % Length of the first list, trunc for float -> int conversion
     ParLen = trunc((Length-FirstLen) / (NrParts-1)),    % Length of the rest of the lists
     {FirstList, Rest} = lists:split(FirstLen, L),
     [FirstList | splitListParLen(Rest, ParLen)].
