@@ -2,22 +2,25 @@
 
 -compile(export_all).
 
+% --- tests --- %
+% Tests I iterations of start using rand:uniform(N), rand:uniform(M) as arguments.
+test(I, N, M) ->
+    ok = test_rand(I, N, M),
+    hooray.
+
+test_rand(0, _N, _M) -> ok;
+test_rand(Num, InN, InM) ->
+    N = rand:uniform(InN),
+    M = rand:uniform(InM),
+    Res = N*M,
+    Res = start(N, M),
+    test_rand(Num-1, InN, InM).
+
+
+% --- public funcs --- % 
 time(N, M) ->
     {Time, Res} = timer:tc(?MODULE, start, [N,M]),
     {{time, Time}, {result, Res}}.
-
-test() ->
-    ok = test(50),
-    hooray.
-
-test(0) -> ok;
-test(Num) ->
-    N = rand:uniform(200),
-    M = rand:uniform(200),
-    Res = N*M,
-    Res = start(N, M),
-    test(Num-1).
-
 
 start(N, M) ->
     {Pid, Processes} = create_ring(N, M, self()),
@@ -28,6 +31,7 @@ start(N, M) ->
     false = check_any_proc_alive(Processes),
     Res.
 
+% --- internal funcs --- %
 check_any_proc_alive([]) -> false;
 check_any_proc_alive([H|T]) ->
     case process_info(H) of
@@ -46,21 +50,21 @@ create_ring_body(PrevPid, M, CurrentN, N, Processes) ->
     Pid = spawn(?MODULE, loop, [PrevPid, 0, M, false, null]),
     create_ring_body(Pid, M, CurrentN+1, N, [Pid|Processes]).
 
-loop(_NextPid, M, M, FirstBol, RPid) -> % End of the loop
+% --- processes loop --- %
+loop(_NextPid, M, M, FirstBol, RPid) -> % Final iteration of the server
     if 
-        FirstBol -> % if it is the first created we send the result back
+        FirstBol ->     % if it is the first created we send the result back
             receive
-                X when is_integer(X) ->
-                    RPid ! X
+                X -> RPid ! X
             end;
-        true ->     % otherwise we just stop
-            stop
+        true -> stop    % otherwise we just stop
+            
     end;
 loop(NextPid, CountRec, M, FirstBol, RPid) ->
     receive
-        Pid when is_pid(Pid) -> % The first process needs to know the last created process to complete the ring
+        Pid when is_pid(Pid) -> % The first process needs to be sent the last created process to complete the ring
             loop(Pid, CountRec, M, FirstBol, RPid);
-        X when is_integer(X) ->
+        X when is_integer(X) -> % Main functionality
             NextPid ! X+1,
             loop(NextPid, CountRec+1, M, FirstBol, RPid)
     end.
