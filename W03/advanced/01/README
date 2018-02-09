@@ -1,0 +1,1 @@
+Use "client:start_all()" to start the processes, the client prints "client reached max limit, stopping" when 10 tries has been reached. 
