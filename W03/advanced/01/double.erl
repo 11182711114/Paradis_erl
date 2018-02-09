@@ -2,7 +2,7 @@
 
 -compile(export_all).
 
-
+%%% Sequencial double server stuff
 start() ->
     generic_server:start(?MODULE, fun doubler/1).
 
