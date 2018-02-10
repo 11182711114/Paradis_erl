@@ -5,7 +5,7 @@
 test(Timeout, Workers) ->
     {Time, _Res} = timer:tc(?MODULE, pmap_maxtime, [fun misc:fib/1, [rand:uniform(250) || _ <- lists:seq(1,200)], Timeout, Workers]),
     true = (Time/1000)-50 =< Timeout, % this is soft real-time after all
-    Time/1000.
+    hooray.
 
 
 % Entry functions
