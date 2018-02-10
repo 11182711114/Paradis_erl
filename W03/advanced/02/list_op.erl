@@ -20,7 +20,7 @@ pmap(F, L, Timeout, MaxWorkers, TimeoutStrategy) ->
 %   Split the list into parts that the different workers will use. 
 %       This is the only way the number of workers is limited
     SplitList = split_list_n_parts(L, MaxWorkers),
-    all_ok = spawn_supervisors(F, SplitList, self(), NewTimeout, TimeoutStrategy), % Spawns supervisors that will spawn workers NewTimeout do the work
+    all_ok = spawn_handler(F, SplitList, self(), NewTimeout, TimeoutStrategy), % Spawns supervisors that will spawn workers NewTimeout do the work
     Res = gather(0, length(SplitList), []), % Gathers the results recursivly in order
     lists:reverse(lists:flatten(Res)).
 
@@ -35,19 +35,19 @@ gather(Count, Final, State) ->
     end.
 
 %% Conveniance entry functions
-spawn_supervisors(F, SplitList, Pid, Deadline, TimeoutStrategy) ->
-    spawn_supervisors(F, SplitList, Pid, 0, Deadline, TimeoutStrategy).
+spawn_handler(F, SplitList, Pid, Deadline, TimeoutStrategy) ->
+    spawn_handler(F, SplitList, Pid, 0, Deadline, TimeoutStrategy).
 
 %% Spawns a worker for every list in the deeplist
-spawn_supervisors(_F, [], _Pid, _Order, _Deadline, _TimeoutStrategy) -> all_ok; %% Base case
-spawn_supervisors(F, [H|T], Pid, Order, Deadline, TimeoutStrategy) ->
-    spawn(?MODULE, worker_supervisor, [F, H, Order, Pid, [], Deadline, TimeoutStrategy]),
-    spawn_supervisors(F, T, Pid, Order+1, Deadline, TimeoutStrategy).
+spawn_handler(_F, [], _Pid, _Order, _Deadline, _TimeoutStrategy) -> all_ok; %% Base case
+spawn_handler(F, [H|T], Pid, Order, Deadline, TimeoutStrategy) ->
+    spawn(?MODULE, worker_handler, [F, H, Order, Pid, [], Deadline, TimeoutStrategy]),
+    spawn_handler(F, T, Pid, Order+1, Deadline, TimeoutStrategy).
 
 %% A worker supervisor, will spawn a worker for each element in the given list and wait for the specified time for a message with the result.
 %% Note that while this spawns concurrent processes the work is done sequencially
-worker_supervisor(_F, [], Num, Pid, Res, _Deadline, _TimeoutStrategy) -> Pid ! {Num, Res};
-worker_supervisor(F, [H|T], Num, Pid, Res, Deadline, TimeoutStrategy) ->
+worker_handler(_F, [], Num, Pid, Res, _Deadline, _TimeoutStrategy) -> Pid ! {Num, Res};
+worker_handler(F, [H|T], Num, Pid, Res, Deadline, TimeoutStrategy) ->
     Tag = make_ref(),
     Worker = spawn(?MODULE, worker, [F, H, {self(), Tag}]),
     TmpRem = case TimeoutStrategy of
@@ -60,7 +60,7 @@ worker_supervisor(F, [H|T], Num, Pid, Res, Deadline, TimeoutStrategy) ->
         after Timeleft -> exit(Worker, timeout), timeout    % Kill and return timeout if we are out of time
     end,
     NewRes = [FRes|Res],
-    worker_supervisor(F, T, Num, Pid, NewRes, Deadline, TimeoutStrategy).
+    worker_handler(F, T, Num, Pid, NewRes, Deadline, TimeoutStrategy).
 
 % Actual worker
 worker(F, Item, {Pid, Tag}) ->
