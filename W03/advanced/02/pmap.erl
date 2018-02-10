@@ -14,9 +14,9 @@ pmap(F, L, Timeout, MaxWorkers, TimeoutStrategy) ->
     NewTimeout = if TimeoutStrategy == deadline -> misc:getTimeStamp()+Timeout; true -> Timeout end, % if its a deadline(maxtime) we need the deadline time
 %   Split the list into parts that the different workers will use. 
 %       This is the only way the number of workers is limited,
-%       list_op:splitList splits a bit bad on short lists, 
-%       e.g. length 10 list, split into 4 -> 4,2,2
-    SplitList = list_op:splitList(L, MaxWorkers),
+%       list_op:split_list_n_parts splits a bit bad on short lists, 
+%       e.g. length 10 list, split into 4 -> 4,2,2,2
+    SplitList = list_op:split_list_n_parts(L, MaxWorkers),
     all_ok = spawn_supervisors(F, SplitList, self(), NewTimeout, TimeoutStrategy), % Spawns supervisors that will spawn workers NewTimeout do the work
     Res = gather(0, length(SplitList), []), % Gathers the results recursivly in order
     lists:reverse(lists:flatten(Res)).
