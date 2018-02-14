@@ -1,12 +1,20 @@
 -module(peer).
-
+-behaviour(gen_server).
 -compile(export_all).
 
+
+index_ip() -> "127.0.0.1".
+index_port() -> 34243.
+tracker_ip() -> "127.0.0.1".
+tracker_port() -> 43534.
+
+init(_Args) ->
+    {ok, #{}}.
 
 handle_call(Req, From, State) ->
     handle(From, Req, State).
 
-handle_cast(Req, From, State) ->
+handle_cast(Req, State) ->
     test.
 
 handle(From, {i_am_interested_in, Md5}, State) ->
