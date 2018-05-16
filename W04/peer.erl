@@ -1,9 +1,13 @@
 -module(peer).
 -compile(export_all).
 
+% Intervals for the peer to announce what it wants to the server and to request files from peers. In ms.
+-define(ANNOUNCE_INTERVAL, 50).
+-define(DOWNLOAD_INTERVAL, 50).
 
 -define(TESTFILE, "files/test.txt").
 -define(DOWNLOAD_LOC, "in/").
+
 
 
 %%%%%%%%%%%%%%%%%%%%%
@@ -12,6 +16,9 @@
 %% the DOWNLOAD_LOC will be created if it does not exist
 %% the resulting downloaded file will be in DOWNLOAD_LOC ++ TESTFILE,
 %% i.e. with the default definitions "in/files/test.txt".
+%%	
+%%	This setup doesnt work with more than 2 clients wanting to download the same file 
+%%		as the peers share download location
 %%
 %%%%%%%%%%%%%%%%%%%%%
 
@@ -35,18 +42,17 @@ test() ->
     Index = index:show_index(),
     io:format("The current index:~p~n", [Index]),
 
+	%% Add the file as want for P2
 	add_want(P2, Md5),
 
-	%timer:sleep(10000),
-	% exit(P1),
-	% exit(P2),
-	% exit(tracker),
-	% exit(index),
-	io:format("Returning test function, the transfer will probably take longer due to wait timers to avoid request races").
+	io:format("Returning test function, the transfer will probably take longer due to wait timers to avoid request races~n").
 
 start() -> spawn(?MODULE, init, []).
 
-init() -> loop([], 1).
+init() -> 
+	erlang:send_after(?ANNOUNCE_INTERVAL, self(), announce),
+	erlang:send_after(?DOWNLOAD_INTERVAL, self(), try_download),
+	loop([]).
 
 
 %% This informs the tracker the peer is interested in a file
@@ -55,60 +61,65 @@ send_interested(L) -> send_interested(L, []).
 
 send_interested([], Res) -> Res;
 
-send_interested([{Md5, not_req} | T], Res) ->
-	%io:format("Sending interested~n"),
+send_interested([{Md5, not_req, DLStatus} | T], Res) ->
 	tracker:peer_wants({i_am_interested_in, Md5, self()}),
-	send_interested(T, [{Md5, req} | Res]);
+	send_interested(T, [{Md5, req, DLStatus} | Res]);
 	
-send_interested([{_, req} = Cur | T], Res) ->
+send_interested([{_, req, _} = Cur | T], Res) ->
 	send_interested(T, [Cur | Res]).
 
 
 %% This asks for a peer list for the wanted files
 %% Entry
-try_download(Wants) ->
-	%io:format("Wants: ~p~n", [Wants]),
-	try_download(Wants, []).
+try_download(Wants) -> try_download(Wants, []).
 
 
 try_download([], Res) -> Res;
 
-try_download([{Md5, req} = Cur | T], Res) ->
-	%io:format("Trying to download ~p~n", [Md5]),
+try_download([{_Md5, req, dl} = Cur | T], Res) ->
+	try_download(T, [Res, Cur]);
+try_download([{Md5, req, not_dl} = Cur | T], Res) ->
 	Peers = ask_for_peers(Md5),
-	%io:format("Received peer list: ~p~n",[Peers]),
-	query_peers(Peers, Md5),
-	try_download(T, [Res|Cur]);
+	case query_peers(Peers, Md5, false) of
+		true 	-> try_download(T, [{Md5, req, dl}|Res]);
+		false 	-> try_download(T, [Cur|Res])
+	end;
 
-try_download([{_Md5, not_req} = Cur | T], Res) ->
-	try_download(T, [Res|Cur]).
+%% Dont try download files we are not peers of, this doesnt really matter for this example but...
+try_download([{_Md5, not_req, _} = Cur | T], Res) ->
+	try_download(T, [Cur|Res]).
 
 
 %% This asks for a peer list for a file
 ask_for_peers(Md5) ->
-	%io:format("Asking for peers ~p~n", [Md5]),
 	tracker:who_has(Md5).
 
 %% This asks peers what they have for a file
-query_peers([], _Md5) -> continue;
-query_peers([Peer | T], Md5) ->
-%	io:format("Querying peer ~p for ~p~n", [Peer, Md5]),
+% Base cases
+query_peers([], _Md5, BoolSent) -> BoolSent;
+query_peers(_Peers, _Md5, true) -> true;
+
+query_peers([Peer | T], Md5, BoolSent) ->
 	Response = query_peer(Peer, Md5),
-	case Response of 
+	NewBoolSent = case Response of 
 		{i_have, true} -> request_from_peer(Peer, Md5);
-		_ -> continue
+		_ -> BoolSent
 	end,
-	query_peers(T, Md5).
+	case NewBoolSent of
+		true 	-> query_peers(T, Md5, true);
+		X 		-> query_peers(T, Md5, X)
+	end.
 
 %% This asks a peer what they have for a file
 query_peer(Pid, Md5) ->
-%	io:format("Querying ~p for ~p~n", [Pid, Md5]),
 	rpc(Pid, {what_have_you, Md5}).
 
 %% This requests a peer to send a file
 request_from_peer(Pid, Md5) ->
-%	io:format("Requesting from ~p data ~p~n", [Pid, Md5]),
-	rpc(Pid, {send_me, Md5, self()}).
+	case rpc(Pid, {send_me, Md5, self()}) of
+		file_sent -> true;
+		_ -> false
+	end.
 
 
 %% Adds a file to a peer, the peer will send a i_have msg to the tracker
@@ -124,50 +135,46 @@ add_want(Pid, Md5) ->
 	rpc(Pid, {add_want, Md5}).
 
 
-%% Wants = [{Md5, req OR not_req}]
-loop(Wants, Mode) ->
-	if 
-		Mode == 2 ->
-			SIWant = send_interested(Wants),
-			try_download(SIWant),
-%			io:format("~p:\tNew Want state = ~p~n",[self(), SIWant]),
-			timer:sleep(500),
-			loop(SIWant, 1);
-		true ->
-			receive
-				{From, Ref, {what_have_you, Md5}} -> 
-					From ! {Ref, {i_have, check_file_exists_for_md5(Md5)}},
-					loop(Wants, 2);
+%% Wants = [{Md5, req OR not_req, dl OR not_dl}]
+loop(Wants) ->
+	receive
+		{From, Ref, {what_have_you, Md5}} -> 
+			From ! {Ref, {i_have, check_file_exists_for_md5(Md5)}},
+			loop(Wants);
 
-				{From, Ref, {send_me, Md5, To}} -> 
-					FileName = index:filename({get_filename, Md5}),
-					send_file(To, FileName),
-					From ! {Ref, file_sent},
-					loop(Wants, 2);
+		{From, Ref, {send_me, Md5, To}} -> 
+			FileName = index:filename({get_filename, Md5}),
+			From ! {Ref, file_sent},
+			send_file(To, FileName),
+			loop(Wants);
 
-				{From, Ref, {save, Data, _Filename}} ->
-%					io:format("~p:\tReceived save req~n",[self()]),
-					Md5 = save_file(Data),
-					From ! {Ref, ok},
-%					io:format("~p:\tRemoving {~p, req} from ~p~n",[self(), Md5, Wants]),
-					NewWants = Wants -- [{Md5, req}],
-%					io:format("~p:\tNewWants = ~p~n",[self(), NewWants]),
-					loop(NewWants , 2);
-				
-				{From, Ref, {add_have, Md5}} ->
-%					io:format("~p:\tSending: ~p to tracker~n", [self(),{i_have, Md5}]),
-					gen_server:call(tracker, {i_have, Md5}),
-					From ! {Ref, ok},
-					loop(Wants, 2);
+		{From, Ref, {save, Data, _Filename}} ->
+			Md5 = save_file(Data),
+			From ! {Ref, ok},
+			ToRemove = [{Md5, req, dl}],
+			NewWants = lists:subtract(Wants, ToRemove), 
+			loop(NewWants);
+		
+		{From, Ref, {add_have, Md5}} ->
+			gen_server:call(tracker, {i_have, Md5}),
+			From ! {Ref, ok},
+			loop(Wants);
 
-				{From, Ref, {add_want, Md5}} ->
-					NewWants = [{Md5, not_req}|Wants],
-%					io:format("~p: \tNew wantsState: ~p~n",[self(),NewWants]),
-					From ! {Ref, ok},
-					loop(NewWants, 2)
-				after 500 ->
-					timeout
-			end
+		{From, Ref, {add_want, Md5}} ->
+			NewWants = [{Md5, not_req, not_dl}|Wants],
+			From ! {Ref, ok},
+			loop(NewWants);
+
+		%% Things that should happen periodically
+		announce ->
+			NewWants = send_interested(Wants),
+			erlang:send_after(?ANNOUNCE_INTERVAL, self(), announce),
+			loop(NewWants);
+
+		try_download ->
+			NewWants = try_download(Wants),
+			erlang:send_after(?DOWNLOAD_INTERVAL, self(), try_download),
+			loop(NewWants)
 	end.
 
 
@@ -207,7 +214,6 @@ save_file(<<"save_file:", B/binary>>) ->
 %% rpc
 
 rpc(Pid, Request) ->
-%	io:format("~p -> ~p -> ~p~n", [self(), Request, Pid]),
 	Ref = make_ref(),
 	Pid ! {self(), Ref, Request},
 	receive

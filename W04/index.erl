@@ -7,7 +7,6 @@
 
 %% Start/Stop/Init
 
-
 start() ->
 	{ok, Pid} = gen_server:start(?MODULE, [], []),
 	(catch register(?NAME, Pid)),
